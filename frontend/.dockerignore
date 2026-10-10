@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+node_modules
+.next
+out
+dist
+build
+coverage
+*.tsbuildinfo
+*.log
+.vercel
+.idea
+.vscode

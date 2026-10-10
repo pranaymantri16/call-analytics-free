@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-callanalytics}
+      POSTGRES_USER: ${POSTGRES_USER:-callanalytics}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-local-password}
+    ports: ["5432:5432"]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-callanalytics} -d ${POSTGRES_DB:-callanalytics}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes: [ollama_data:/root/.ollama]
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama serve & pid=$!; until ollama list >/dev/null 2>&1; do sleep 2; done; ollama pull $${OLLAMA_MODEL:-llama3.2}; wait $$pid"]
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-callanalytics}:${POSTGRES_PASSWORD:-change-this-local-password}@postgres:5432/${POSTGRES_DB:-callanalytics}
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: http://ollama:11434
+      AUDIO_DIR: /data/audio
+    ports: ["${BACKEND_PORT:-8000}:8000"]
+    volumes: [audio_data:/data/audio, hf_cache:/root/.cache/huggingface]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      ollama: {condition: service_started}
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    command: ["celery", "-A", "app.tasks.celery_tasks.celery_app", "worker", "--loglevel=INFO", "--pool=solo"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-callanalytics}:${POSTGRES_PASSWORD:-change-this-local-password}@postgres:5432/${POSTGRES_DB:-callanalytics}
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_BASE_URL: http://ollama:11434
+      AUDIO_DIR: /data/audio
+    volumes: [audio_data:/data/audio, hf_cache:/root/.cache/huggingface]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      ollama: {condition: service_started}
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+    ports: ["${FRONTEND_PORT:-3000}:3000"]
+    depends_on: [backend]
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  ollama_data:
+  audio_data:
+  hf_cache:

@@ -1,0 +1,2 @@
+# Convenience alternative to the repository-root compose file.
+# Prefer: docker compose -f ../docker-compose.yml up --build
