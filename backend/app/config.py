@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import SecretStr
 
 class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://callanalytics:callanalytics@localhost:5432/callanalytics"
@@ -12,6 +13,15 @@ class Settings(BaseSettings):
     webhook_secret: str | None = None
     max_upload_mb: int = 200
     audio_dir: str = "/data/audio"
+    erpnext_enabled: bool = False
+    erpnext_base_url: str = ""
+    erpnext_api_key: SecretStr = SecretStr("")
+    erpnext_api_secret: SecretStr = SecretStr("")
+    erpnext_analysis_endpoint: str = "/api/method/call_analytics_integration.api.receive_call_analysis"
+    erpnext_request_timeout: float = 30
+    erpnext_max_retries: int = 5
+    erpnext_allow_http: bool = False
+    erpnext_admin_token: SecretStr = SecretStr("")
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

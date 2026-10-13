@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "call_id": "42",
+  "recording_id": "42",
+  "customer_reference": null,
+  "lead_reference": null,
+  "contact_reference": null,
+  "employee_reference": null,
+  "call_datetime": "2026-01-01T00:00:00Z",
+  "duration_seconds": 42.5,
+  "direction": null,
+  "analysis_status": "Completed",
+  "transcript": "Customer: please send a quote.",
+  "summary": "Customer requested a quote.",
+  "customer_interest_level": "High",
+  "key_topics": [
+    "Pricing"
+  ],
+  "action_items": [
+    "Send quote"
+  ],
+  "agent_performance_score": 8,
+  "recording": {
+    "storage_type": "local",
+    "object_key": null
+  },
+  "source_updated_at": "2026-01-01T01:00:00Z"
+}

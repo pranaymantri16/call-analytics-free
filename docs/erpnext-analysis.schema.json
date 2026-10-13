@@ -1,0 +1,185 @@
+{
+  "$defs": {
+    "RecordingReference": {
+      "additionalProperties": false,
+      "properties": {
+        "storage_type": {
+          "const": "local",
+          "default": "local",
+          "title": "Storage Type",
+          "type": "string"
+        },
+        "object_key": {
+          "default": null,
+          "title": "Object Key",
+          "type": "null"
+        }
+      },
+      "title": "RecordingReference",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "call_id": {
+      "title": "Call Id",
+      "type": "string"
+    },
+    "recording_id": {
+      "title": "Recording Id",
+      "type": "string"
+    },
+    "customer_reference": {
+      "default": null,
+      "title": "Customer Reference",
+      "type": "null"
+    },
+    "lead_reference": {
+      "default": null,
+      "title": "Lead Reference",
+      "type": "null"
+    },
+    "contact_reference": {
+      "default": null,
+      "title": "Contact Reference",
+      "type": "null"
+    },
+    "employee_reference": {
+      "default": null,
+      "title": "Employee Reference",
+      "type": "null"
+    },
+    "call_datetime": {
+      "format": "date-time",
+      "title": "Call Datetime",
+      "type": "string"
+    },
+    "duration_seconds": {
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Duration Seconds"
+    },
+    "direction": {
+      "anyOf": [
+        {
+          "enum": [
+            "Inbound",
+            "Outbound"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Direction"
+    },
+    "analysis_status": {
+      "const": "Completed",
+      "default": "Completed",
+      "title": "Analysis Status",
+      "type": "string"
+    },
+    "transcript": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Transcript"
+    },
+    "summary": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Summary"
+    },
+    "customer_interest_level": {
+      "anyOf": [
+        {
+          "enum": [
+            "High",
+            "Medium",
+            "Low"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Customer Interest Level"
+    },
+    "key_topics": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Key Topics",
+      "type": "array"
+    },
+    "action_items": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Action Items",
+      "type": "array"
+    },
+    "agent_performance_score": {
+      "anyOf": [
+        {
+          "maximum": 10,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Performance Score"
+    },
+    "recording": {
+      "$ref": "#/$defs/RecordingReference"
+    },
+    "source_updated_at": {
+      "format": "date-time",
+      "title": "Source Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "call_id",
+    "recording_id",
+    "call_datetime",
+    "recording",
+    "source_updated_at"
+  ],
+  "title": "AnalysisPayload",
+  "type": "object"
+}

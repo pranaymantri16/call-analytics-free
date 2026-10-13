@@ -97,3 +97,12 @@ Run PostgreSQL, Redis, and Ollama yourself; install backend dependencies from `b
 - Uploads and webhooks accept common FFmpeg-decodable formats, including WAV, MP3, M4A, MP4, AAC, OGG, OPUS, FLAC, WMA, AIFF, AMR, WebM, MKV, MOV, and other listed extensions. Format support depends on the file containing a valid audio stream and FFmpeg being available.
 - Before transcription and diarization, FFmpeg converts input audio to mono 16 kHz PCM WAV. This gives Faster-Whisper and pyannote a consistent input format. FFmpeg is installed in the backend Docker image.
 - No application can decode literally every possible audio format. Unsupported codecs, corrupt files, or video containers without an audio stream will return a processing error.
+
+## ERPNext CRM synchronization
+
+Optional ERPNext delivery, protected administration, retry recovery, the versioned
+payload contract, and the receiving Frappe method requirements are documented in
+[docs/erpnext-integration.md](docs/erpnext-integration.md). It is disabled by default.
+
+For the beginner-friendly Frappe Cloud setup, receiving script, Postman tests, and
+dashboard steps, see [ERPNext_setup_file.md](ERPNext_setup_file.md).

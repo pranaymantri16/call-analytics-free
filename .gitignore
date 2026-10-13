@@ -40,6 +40,8 @@ transcripts/
 models/
 !backend/app/models/
 !backend/app/models/**
+__pycache__/
+*.py[cod]
 .cache/
 .ollama/
 hf_cache/
@@ -68,6 +70,7 @@ audio_data/
 .DS_Store
 Thumbs.db
 Desktop.ini
+celerybeat-schedule*
 .agents/
 .codex/
 .aws/

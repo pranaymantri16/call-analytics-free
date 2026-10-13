@@ -64,6 +64,18 @@ services:
       ollama: {condition: service_started}
     restart: unless-stopped
 
+  beat:
+    build: ./backend
+    command: ["celery", "-A", "app.tasks.celery_tasks.celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/erpnext-beat"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-callanalytics}:${POSTGRES_PASSWORD:-change-this-local-password}@postgres:5432/${POSTGRES_DB:-callanalytics}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      backend: {condition: service_started}
+      redis: {condition: service_healthy}
+    restart: unless-stopped
+
   frontend:
     build: ./frontend
     environment:
