@@ -1,9 +1,10 @@
 import asyncio
 from datetime import datetime, timezone
 from celery import Celery
+from sqlalchemy import select
 from app.config import settings
 from app.database import AsyncSessionLocal, engine
-from app.models import Call
+from app.models import Call, MobileRecording
 from app.services.erpnext import validate_configuration
 from app.services.erpnext_sync import add_pending, enqueue, event, sync_call, recover
 
@@ -13,6 +14,7 @@ celery_app = Celery("call_analytics", broker=settings.redis_url, backend=setting
 celery_app.conf.update(task_serializer="json", result_serializer="json",
                        accept_content=["json"], task_track_started=True)
 celery_app.conf.beat_schedule = {
+    "mobile-dispatch-recovery": {"task": "recover_mobile_uploads", "schedule": 60.0},
     "erpnext-recovery": {"task": "recover_erpnext", "schedule": 60.0},
 }
 
@@ -45,6 +47,16 @@ def process_call(call_id: int):
     asyncio.run(_process_call_async(call_id))
 
 async def _process_call_async(call_id: int):
+    from app.services.processing_guard import processing_guard
+    try:
+        async with processing_guard(engine, call_id) as acquired:
+            if acquired:
+                await _process_call_once(call_id)
+    finally:
+        await engine.dispose()
+
+
+async def _process_call_once(call_id):
     from app.services.stt_service import transcribe_and_diarize
     from app.services.llm_service import summarize_call
     try:
@@ -52,6 +64,8 @@ async def _process_call_async(call_id: int):
             call = await db.get(Call, call_id)
             if not call:
                 return
+            if call.status == "completed" and await db.scalar(select(MobileRecording.id).where(MobileRecording.call_id == call_id)):
+                return  # Completed mobile uploads must not rerun on task redelivery.
             call.status = "processing"
             call.error_message = None
             await db.commit()
@@ -82,6 +96,17 @@ async def _process_call_async(call_id: int):
             if call.status == "completed":
                 enqueue(call.id)
     finally:
-        # Celery uses a new event loop per task; dispose so the next task
-        # does not reuse asyncpg connections bound to a closed loop.
+        pass  # Pool disposal happens after the processing guard releases its lock.
+
+
+@celery_app.task(name="recover_mobile_uploads", ignore_result=True)
+def recover_mobile_uploads():
+    asyncio.run(_recover_mobile_async())
+
+
+async def _recover_mobile_async():
+    from app.services.mobile_dispatch import recover_mobile
+    try:
+        await recover_mobile()
+    finally:
         await engine.dispose()

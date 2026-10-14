@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     erpnext_max_retries: int = 5
     erpnext_allow_http: bool = False
     erpnext_admin_token: SecretStr = SecretStr("")
+    mobile_enabled: bool = False
+    mobile_devices: dict[str, SecretStr] = {}
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()
