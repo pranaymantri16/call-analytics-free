@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models import Call, ERPNextSync
 from app.services.erpnext import ERPNextClient, IntegrationError
 from app.services.erpnext_sync import add_pending, enqueue, now, sync_metrics
+from app.services.recording_audit import record
 
 
 async def require_admin(authorization: str | None = Header(default=None)):
@@ -60,6 +61,8 @@ async def retry(call_id: int, db=Depends(get_db)):
                            .with_for_update())).scalar_one()
     if row.status == "processing" and row.lease_until and row.lease_until > now():
         raise HTTPException(409, "Synchronization is already processing")
+    await record(db, stage="crm", event="crm_manual_requeue", outcome="received", call_id=call_id,
+                 details={"previous_status": row.status, "previous_attempt_count": row.attempt_count})
     row.status, row.attempt_count, row.last_error = "pending", 0, None
     row.next_retry_at = now()
     row.lease_until = row.lease_token = None

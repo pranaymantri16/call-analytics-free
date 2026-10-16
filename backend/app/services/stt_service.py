@@ -3,8 +3,11 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import logging
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -20,6 +23,7 @@ def get_whisper():
 @lru_cache(maxsize=1)
 def get_diarization_pipeline():
     if not settings.hf_token:
+        logger.warning("diarization_unavailable reason=hf_token_not_configured")
         return None
     try:
         from pyannote.audio import Pipeline
@@ -27,9 +31,44 @@ def get_diarization_pipeline():
             "pyannote/speaker-diarization-3.1",
             use_auth_token=settings.hf_token,
         )
-    except Exception as exc:
-        print(f"pyannote pipeline unavailable; using single-speaker fallback: {exc}")
+    except Exception:
+        logger.warning("diarization_unavailable reason=pipeline_initialization_failed")
         return None
+
+
+def align_speakers(raw_segments, turns):
+    """Split Whisper segments at word boundaries when acoustic speakers change."""
+    def speaker_at(start, end):
+        overlaps = {}
+        for turn in turns:
+            overlap = max(0.0, min(end, turn["end"]) - max(start, turn["start"]))
+            if overlap:
+                overlaps[turn["speaker"]] = overlaps.get(turn["speaker"], 0) + overlap
+        return max(overlaps, key=overlaps.get) if overlaps else "SPEAKER_UNKNOWN"
+    merged = []
+    for segment in raw_segments:
+        words = segment.get("words")
+        if words:
+            groups = []
+            for word in words:
+                speaker = speaker_at(word["start"], word["end"])
+                sentence_break = (not turns and groups and (
+                    groups[-1]["text"].rstrip().endswith((".", "?", "!", "।"))
+                    or word["start"] - groups[-1]["end"] >= 0.6
+                    or word["end"] - groups[-1]["start"] > 12))
+                if groups and groups[-1]["speaker"] == speaker and not sentence_break:
+                    groups[-1]["text"] += word["word"]
+                    groups[-1]["end"] = word["end"]
+                else:
+                    groups.append({"start": word["start"], "end": word["end"], "text": word["word"], "speaker": speaker})
+            for group in groups:
+                group["text"] = group["text"].strip()
+                if group["text"]:
+                    merged.append({**group, "role": "Unknown"})
+        else:
+            merged.append({"start": segment["start"], "end": segment["end"], "text": segment["text"],
+                           "speaker": speaker_at(segment["start"], segment["end"]), "role": "Unknown"})
+    return merged
 
 
 def normalize_audio_to_wav(audio_path: str) -> str:
@@ -64,9 +103,10 @@ def transcribe_and_diarize(audio_path: str) -> dict:
     normalized_path = normalize_audio_to_wav(audio_path)
     try:
         model = get_whisper()
-        segments_iter, info = model.transcribe(normalized_path, vad_filter=True)
+        segments_iter, info = model.transcribe(normalized_path, vad_filter=True, word_timestamps=True)
         raw_segments = [
-            {"start": float(s.start), "end": float(s.end), "text": s.text.strip()}
+            {"start": float(s.start), "end": float(s.end), "text": s.text.strip(),
+             "words": [{"start": float(w.start), "end": float(w.end), "word": w.word} for w in (s.words or [])]}
             for s in segments_iter
         ]
 
@@ -77,34 +117,19 @@ def transcribe_and_diarize(audio_path: str) -> dict:
                 diarization = pipeline(normalized_path)
                 for turn, _, speaker in diarization.itertracks(yield_label=True):
                     turns.append({"start": float(turn.start), "end": float(turn.end), "speaker": str(speaker)})
-            except Exception as exc:
-                print(f"Diarization failed; using single-speaker fallback: {exc}")
+            except Exception:
+                logger.warning("diarization_unavailable reason=inference_failed")
 
-        merged = []
-        for seg in raw_segments:
-            overlaps = {}
-            for turn in turns:
-                overlap = max(0.0, min(seg["end"], turn["end"]) - max(seg["start"], turn["start"]))
-                if overlap:
-                    overlaps[turn["speaker"]] = overlaps.get(turn["speaker"], 0.0) + overlap
-            speaker = max(overlaps, key=overlaps.get) if overlaps else "SPEAKER_00"
-            merged.append({**seg, "speaker": speaker, "role": "Caller"})
-
-        # Role names are heuristics: the first speaker heard is labeled Caller.
-        seen = []
-        for seg in merged:
-            if seg["speaker"] not in seen:
-                seen.append(seg["speaker"])
-        for seg in merged:
-            seg["role"] = "Caller" if seen.index(seg["speaker"]) == 0 else "Customer"
-
-        transcript = "\n".join(f'[{s["role"]}]: {s["text"]}' for s in merged)
+        merged = align_speakers(raw_segments, turns)
+        transcript = "\n".join(f'[Unassigned | {s["speaker"]}]: {s["text"]}' for s in merged)
         duration = max((s["end"] for s in raw_segments), default=0.0)
         return {
             "segments": merged,
             "transcript": transcript,
             "duration_seconds": duration,
             "language": getattr(info, "language", None),
+            "diarization_status": "available" if turns else "unavailable",
+            "role_resolution_required": True,
         }
     finally:
         try:

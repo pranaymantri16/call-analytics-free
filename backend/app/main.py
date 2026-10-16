@@ -9,6 +9,7 @@ from app.api.erpnext import router as erpnext_router
 from app.services.erpnext import validate_configuration
 from app.config import settings
 from app.api.mobile import router as mobile_router
+from app.api.recording_audit import router as recording_audit_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,6 +25,7 @@ app.include_router(webhooks_router)
 app.include_router(analytics_router)
 app.include_router(erpnext_router)
 app.include_router(mobile_router)
+app.include_router(recording_audit_router)
 
 @app.get("/health")
 async def health():

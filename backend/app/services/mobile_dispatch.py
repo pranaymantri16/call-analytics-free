@@ -6,6 +6,7 @@ from sqlalchemy import or_, select, update
 from app.database import AsyncSessionLocal
 from app.models.mobile import MobileRecording
 from app.models.call import Call
+from app.services.recording_audit import record
 
 
 def due(now):
@@ -28,6 +29,9 @@ async def dispatch_recording(receipt_id, session_factory=None, submit=None):
             return False
         row = await db.get(MobileRecording, receipt_id)
         call_id, attempt = row.call_id, row.dispatch_attempts
+        await record(db, stage="dispatch", event="processing_dispatch_attempt", outcome="processing",
+                     call_id=call_id, device_id=row.device_id, recording_id=row.recording_id,
+                     correlation_id=token, attempt=attempt, details={"receipt_id": receipt_id})
         await db.commit()
     try:
         if submit is None:
@@ -38,7 +42,13 @@ async def dispatch_recording(receipt_id, session_factory=None, submit=None):
     except Exception:
         values = dict(dispatch_state="pending", lease_token=None, next_dispatch_at=now+timedelta(seconds=min(300, 5 * 2**min(attempt, 6))), last_error="broker_unavailable")
     async with factory() as db:
-        await db.execute(update(MobileRecording).where(MobileRecording.id == receipt_id, MobileRecording.lease_token == token).values(**values))
+        changed = await db.execute(update(MobileRecording).where(MobileRecording.id == receipt_id, MobileRecording.lease_token == token).values(**values))
+        if changed.rowcount == 1:
+            await record(db, stage="dispatch", event="processing_dispatch_result",
+                         outcome="success" if values["dispatch_state"] == "sent" else "retry",
+                         call_id=call_id, correlation_id=token, attempt=attempt,
+                         details={"dispatch_state": values["dispatch_state"],
+                                  "error_code": values["last_error"], "next_retry_at": values["next_dispatch_at"]})
         await db.commit()
     return values["dispatch_state"] == "sent"
 

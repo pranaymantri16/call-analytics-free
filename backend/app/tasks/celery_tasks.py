@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from datetime import datetime, timezone
 from celery import Celery
 from sqlalchemy import select
@@ -7,6 +8,8 @@ from app.database import AsyncSessionLocal, engine
 from app.models import Call, MobileRecording
 from app.services.erpnext import validate_configuration
 from app.services.erpnext_sync import add_pending, enqueue, event, sync_call, recover
+from app.services.recording_audit import record, analysis_snapshot
+from app.services.speaker_roles import resolve_speaker_roles
 
 validate_configuration(settings)
 
@@ -68,9 +71,25 @@ async def _process_call_once(call_id):
                 return  # Completed mobile uploads must not rerun on task redelivery.
             call.status = "processing"
             call.error_message = None
+            processing_id = str(uuid.uuid4())
+            await record(db, stage="analysis", event="analysis_started", outcome="processing",
+                         call_id=call_id, correlation_id=processing_id)
             await db.commit()
             try:
                 stt = await asyncio.to_thread(transcribe_and_diarize, call.audio_path)
+                await record(db, stage="analysis", event="transcription_completed", outcome="success",
+                             call_id=call_id, correlation_id=processing_id,
+                             details={"transcript": stt["transcript"], "segments": stt["segments"],
+                                      "duration_seconds": stt["duration_seconds"]})
+                await db.commit()
+                stt = await resolve_speaker_roles(stt)
+                if stt.get("role_resolution"):
+                    await record(db, stage="analysis", event="speaker_roles_resolved",
+                                 outcome="success" if stt["role_resolution"]["assigned_segments"] else "ignored",
+                                 call_id=call_id, correlation_id=processing_id,
+                                 details={"resolution": stt["role_resolution"], "segments": stt["segments"],
+                                          "transcript": stt["transcript"]})
+                    await db.commit()
                 summary = await summarize_call(stt["transcript"])
                 call.transcript = stt["transcript"]
                 call.segments = stt["segments"]
@@ -85,6 +104,11 @@ async def _process_call_once(call_id):
             except Exception as exc:
                 call.status = "failed"
                 call.error_message = str(exc)[:4000]
+            await record(db, stage="analysis",
+                         event="analysis_completed" if call.status == "completed" else "analysis_failed",
+                         outcome="success" if call.status == "completed" else "failed",
+                         call_id=call_id, correlation_id=processing_id,
+                         details=analysis_snapshot(call) if call.status == "completed" else {"error_code": "analysis_processing_failed"})
             if call.status == "completed" and settings.erpnext_enabled:
                 try:
                     async with db.begin_nested():
@@ -92,6 +116,11 @@ async def _process_call_once(call_id):
                 except Exception:
                     # A recovery scan repairs this gap without losing analysis.
                     event("outbox_deferred", call_id=call.id, error_code="outbox_write_failure")
+                    await record(db, stage="crm", event="crm_queue_deferred", outcome="retry", call_id=call.id,
+                                 details={"error_code": "outbox_write_failure"})
+            elif call.status == "completed":
+                await record(db, stage="crm", event="crm_disabled", outcome="ignored", call_id=call.id,
+                             details={"reason": "ERPNext integration is disabled"})
             await db.commit()
             if call.status == "completed":
                 enqueue(call.id)

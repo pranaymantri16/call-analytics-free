@@ -5,7 +5,7 @@ A local-first MVP for uploading call recordings, transcribing them with Faster-W
 ## What “$0 recurring API cost” means
 - Runtime inference is local: no paid transcription, LLM, database, or queue API.
 - You still need a computer with enough CPU/RAM (and ideally a compatible GPU), disk space for models, and Docker.
-- pyannote's pretrained diarization model may require a Hugging Face account/token and accepting the model terms before downloading. This is model-download authentication, not a hosted inference API. Set `HF_TOKEN`; if unavailable, the pipeline falls back to one-speaker labels.
+- pyannote's pretrained diarization model requires Hugging Face model access and `HF_TOKEN`. Without it, role attribution uses marked text-based inference and leaves uncertain speech unassigned. See [speaker role setup](docs/SPEAKER_ROLES.md).
 - Ollama downloads `llama3.2` on first startup. Model downloads require internet once; afterwards inference is local.
 - Only process calls you are authorized to record and analyze. Protect audio/transcripts and configure retention/access controls before production use.
 
@@ -106,3 +106,10 @@ payload contract, and the receiving Frappe method requirements are documented in
 
 For the beginner-friendly Frappe Cloud setup, receiving script, Postman tests, and
 dashboard steps, see [ERPNext_setup_file.md](ERPNext_setup_file.md).
+
+## Recording audit trail
+
+Open **Recording audit trail** from the dashboard to inspect APK metadata,
+processing results, outgoing CRM payloads, responses and retries. Access requires
+your `ERPNEXT_ADMIN_TOKEN`. See [docs/RECORDING_AUDIT.md](docs/RECORDING_AUDIT.md)
+for setup, filters, redaction and storage details.

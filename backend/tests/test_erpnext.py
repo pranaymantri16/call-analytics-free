@@ -16,7 +16,8 @@ from sqlalchemy.types import TypeDecorator
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app.config import Settings
 from app.database import Base
-from app.models import Call, Caller, Customer, ERPNextSync
+from app.models import Call, Caller, Customer, ERPNextSync, RecordingAudit
+from sqlalchemy import select
 from app.services.erpnext import ERPNextClient, IntegrationError, build_payload, validate_configuration
 from app.services.erpnext_sync import add_pending, sync_call, recover, sync_metrics
 
@@ -314,6 +315,48 @@ class DurableSyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_disabled_sync_no_attempt(self):
         await sync_call(42, self.sessions, config(erpnext_enabled=False), self.client())
         self.assertEqual((await self.row()).attempt_count, 0)
+
+    async def test_crm_audit_captures_exact_payload_and_ack_per_attempt(self):
+        received = []
+        def respond(request):
+            received.append(json.loads(request.content))
+            return httpx.Response(200, json={"message": {"status": "accepted", "call_id": "42"}})
+        await sync_call(42, self.sessions, config(), ERPNextClient(config(), httpx.MockTransport(respond)))
+        async with self.sessions() as db:
+            rows = (await db.execute(select(RecordingAudit).where(RecordingAudit.stage == "crm").order_by(RecordingAudit.id))).scalars().all()
+        request = next(row for row in rows if row.event == "crm_request")
+        result = next(row for row in rows if row.event == "crm_result")
+        self.assertEqual(request.details["payload"], received[0])
+        self.assertEqual(result.details["response"]["http_status"], 200)
+        self.assertEqual(result.details["response"]["body"]["message"]["call_id"], "42")
+        self.assertEqual(request.correlation_id, result.correlation_id)
+        self.assertEqual(result.outcome, "success")
+
+    async def test_crm_audit_http_failure_is_redacted_and_retry_is_separate(self):
+        def unavailable(request):
+            return httpx.Response(503, json={"message": "test-secret test-key", "api_secret": "another-secret", "exc": "private traceback"})
+        await sync_call(42, self.sessions, config(), ERPNextClient(config(), httpx.MockTransport(unavailable)))
+        async with self.sessions() as db:
+            row = await db.get(ERPNextSync, 42)
+            row.next_retry_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            await db.commit()
+        await sync_call(42, self.sessions, config(), self.client())
+        async with self.sessions() as db:
+            rows = (await db.execute(select(RecordingAudit).where(RecordingAudit.event == "crm_result").order_by(RecordingAudit.id))).scalars().all()
+        self.assertEqual([row.attempt for row in rows], [1, 2])
+        self.assertEqual([row.outcome for row in rows], ["retry", "success"])
+        self.assertEqual(rows[0].details["response"]["http_status"], 503)
+        for secret in ("test-secret", "test-key", "another-secret", "private traceback"):
+            self.assertNotIn(secret, json.dumps(rows[0].details))
+
+    async def test_crm_audit_timeout_records_no_fabricated_response(self):
+        def timeout(request):
+            raise httpx.ReadTimeout("test-secret should not appear")
+        await sync_call(42, self.sessions, config(), ERPNextClient(config(), httpx.MockTransport(timeout)))
+        async with self.sessions() as db:
+            row = (await db.execute(select(RecordingAudit).where(RecordingAudit.event == "crm_result"))).scalar_one()
+        self.assertEqual(row.details["error_code"], "network_timeout")
+        self.assertIsNone(row.details["response"])
 
     async def test_invalid_persisted_data_does_not_send(self):
         async with self.sessions() as db:

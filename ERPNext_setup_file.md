@@ -1,5 +1,8 @@
 # ERPNext setup guide for Call Analytics
 
+For inspecting APK uploads, analysis, outgoing CRM payloads and responses inside
+the application, see [Recording audit trail](docs/RECORDING_AUDIT.md).
+
 This guide saves the setup steps from our conversation for reuse. It covers a
 Frappe Cloud test receiver, a dashboard page, Postman checks, and connecting the
 existing local analytics application. All credentials below are placeholders.

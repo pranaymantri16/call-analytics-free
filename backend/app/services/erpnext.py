@@ -1,5 +1,6 @@
 """Versioned contract and bounded ERPNext HTTP client. Remote errors are untrusted."""
 import asyncio
+import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Literal
@@ -108,8 +109,10 @@ class ERPNextClient:
     def __init__(self, config, transport=None):
         validate_configuration(config)
         self.config, self.transport = config, transport
+        self.last_response = None
 
     async def _request(self, method, endpoint, payload=None):
+        self.last_response = None
         if not self.config.erpnext_enabled:
             raise IntegrationError("integration_disabled")
         headers = {"Authorization": "token " + self.config.erpnext_api_key.get_secret_value()
@@ -127,6 +130,18 @@ class ERPNextClient:
             raise IntegrationError("network_timeout", True, "network") from None
         except httpx.RequestError:
             raise IntegrationError("network_failure", True, "network") from None
+        # Capture the actual reply for the protected audit trail. Never retain headers.
+        response_bytes = response.content
+        if len(response_bytes) <= 128 * 1024:
+            try:
+                response_body = response.json()
+            except ValueError:
+                response_body = {"format": "non_json", "size_bytes": len(response_bytes),
+                                 "sha256": hashlib.sha256(response_bytes).hexdigest()}
+        else:
+            response_body = {"omitted": "response_exceeds_128_KiB", "size_bytes": len(response_bytes),
+                             "sha256": hashlib.sha256(response_bytes).hexdigest()}
+        self.last_response = {"http_status": response.status_code, "body": response_body}
         category = f"{response.status_code // 100}xx"
         if not 200 <= response.status_code < 300:
             raise IntegrationError(f"http_{response.status_code}",
